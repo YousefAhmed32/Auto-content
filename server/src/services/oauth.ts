@@ -6,6 +6,7 @@ import { getConnection, saveConnection } from "../store.js";
 import type { Platform, StoredConnection } from "../types.js";
 
 const metaScopes = [
+  "business_management",
   "pages_show_list",
   "pages_read_engagement",
   "pages_manage_posts",
@@ -48,9 +49,16 @@ export function getAuthorizationUrl(platform: Platform) {
     client_id: config.meta.appId,
     redirect_uri: callbackUrl(platform),
     state,
-    response_type: "code",
-    scope: metaScopes.join(",")
+    response_type: "code"
   });
+
+  if (config.meta.loginConfigId) {
+    params.set("config_id", config.meta.loginConfigId);
+    params.set("override_default_response_type", "true");
+  } else {
+    params.set("scope", metaScopes.join(","));
+  }
+
   return `https://www.facebook.com/${config.meta.graphVersion}/dialog/oauth?${params.toString()}`;
 }
 
@@ -201,4 +209,3 @@ export async function getGoogleAuthClient() {
   });
   return client;
 }
-

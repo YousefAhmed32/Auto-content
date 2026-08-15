@@ -24,6 +24,7 @@ export const config = {
   meta: {
     appId: process.env.META_APP_ID ?? "",
     appSecret: process.env.META_APP_SECRET ?? "",
+    loginConfigId: process.env.META_LOGIN_CONFIG_ID ?? "",
     graphVersion: process.env.META_GRAPH_VERSION ?? "v23.0"
   },
   google: {
