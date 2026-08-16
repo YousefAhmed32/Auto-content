@@ -52,6 +52,8 @@ function migratePost(raw: Record<string, unknown>): PostRecord {
 
   return {
     id: String(raw.id),
+    // منشورات ما قبل Simple/Advanced Mode لا تحمل هذا الحقل - نفترض "advanced" لأنها كانت تُحرَّر بكل التفاصيل أصلًا.
+    contentMode: raw.contentMode === "simple" ? "simple" : "advanced",
     base,
     platforms: Array.isArray(raw.platforms) ? (raw.platforms as Platform[]) : [],
     overrides,

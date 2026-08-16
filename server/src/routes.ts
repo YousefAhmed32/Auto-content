@@ -68,7 +68,11 @@ function validationError(message: string) {
   return Object.assign(new Error(message), { status: 400 });
 }
 
-function parseMediaMeta(value: unknown, count: number): Array<{ altText?: string; caption?: string }> {
+function parseContentMode(value: unknown, fallback: "simple" | "advanced" = "advanced"): "simple" | "advanced" {
+  return value === "simple" || value === "advanced" ? value : fallback;
+}
+
+function parseMediaMeta(value: unknown, count: number): Array<{ altText?: string; caption?: string; width?: number; height?: number }> {
   let parsed: unknown = value;
   if (typeof value === "string") {
     try { parsed = JSON.parse(value); } catch { parsed = []; }
@@ -78,9 +82,13 @@ function parseMediaMeta(value: unknown, count: number): Array<{ altText?: string
     const entry = list[index];
     if (!entry || typeof entry !== "object") return {};
     const record = entry as Record<string, unknown>;
+    const width = typeof record.width === "number" && Number.isFinite(record.width) ? Math.round(record.width) : undefined;
+    const height = typeof record.height === "number" && Number.isFinite(record.height) ? Math.round(record.height) : undefined;
     return {
       altText: typeof record.altText === "string" ? record.altText.slice(0, 1000) : undefined,
-      caption: typeof record.caption === "string" ? record.caption.slice(0, 300) : undefined
+      caption: typeof record.caption === "string" ? record.caption.slice(0, 300) : undefined,
+      width: width && width > 0 ? width : undefined,
+      height: height && height > 0 ? height : undefined
     };
   });
 }
@@ -198,6 +206,7 @@ apiRouter.post("/posts", async (request, response) => {
   const selectedPlatforms = parsePlatforms(request.body.platforms);
   const post: PostRecord = {
     id,
+    contentMode: parseContentMode(request.body.contentMode),
     base: {
       title: String(request.body.title ?? "").trim().slice(0, 200),
       caption: String(request.body.caption ?? "").trim().slice(0, 5000),
@@ -225,6 +234,7 @@ apiRouter.patch("/posts/:id", async (request, response, next) => {
       throw Object.assign(new Error("لا يمكن تعديل منشور بعد بدء عملية نشره - استخدم إعادة المحاولة بدلًا من ذلك"), { status: 409 });
     }
 
+    if (request.body.contentMode !== undefined) post.contentMode = parseContentMode(request.body.contentMode, post.contentMode);
     if (request.body.title !== undefined) post.base.title = String(request.body.title).trim().slice(0, 200);
     if (request.body.caption !== undefined) post.base.caption = String(request.body.caption).trim().slice(0, 5000);
     if (request.body.hashtags !== undefined) post.base.hashtags = parseHashtags(request.body.hashtags);
@@ -298,7 +308,9 @@ apiRouter.post("/posts/:id/media", upload.array("media", MAX_MEDIA_PER_POST), as
       url: `${config.publicAppUrl}/api/media/${encodeURIComponent(file.filename)}`,
       order: nextOrder++,
       altText: meta[index]?.altText,
-      caption: meta[index]?.caption
+      caption: meta[index]?.caption,
+      width: meta[index]?.width,
+      height: meta[index]?.height
     }));
     post.media.push(...newAssets);
     post.updatedAt = new Date().toISOString();

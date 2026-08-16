@@ -13,7 +13,11 @@ export interface MediaAsset {
   order: number;
   altText?: string;
   caption?: string;
+  width?: number;
+  height?: number;
 }
+
+export type ContentMode = "simple" | "advanced";
 
 export interface TikTokOverride {
   privacyLevel?: string;
@@ -75,6 +79,7 @@ export type PostValidation = Partial<Record<Platform, ValidationIssue[]>>;
 
 export interface PostRecord {
   id: string;
+  contentMode: ContentMode;
   base: BaseContent;
   platforms: Platform[];
   overrides: Partial<Record<Platform, PlatformOverride>>;
@@ -104,12 +109,19 @@ export interface DashboardData {
   recentPosts: PostRecord[];
 }
 
+export interface AspectRatioGuidance {
+  min: number;
+  max: number;
+  note: string;
+}
+
 export interface MediaCapability {
   formats: string[];
   maxCount: number;
   minCount: number;
   maxFileSizeMb?: number;
   altText: { supported: boolean; maxLength?: number; note: string };
+  aspectRatio?: AspectRatioGuidance;
 }
 
 export interface VideoCapability {
@@ -117,6 +129,7 @@ export interface VideoCapability {
   maxCount: number;
   maxDurationSeconds?: number;
   cover: { supported: boolean; kind?: "timestampMs" | "index"; note: string };
+  aspectRatio?: AspectRatioGuidance;
 }
 
 export interface CarouselCapability {

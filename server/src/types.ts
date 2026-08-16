@@ -19,7 +19,13 @@ export interface MediaAsset {
   altText?: string;
   /** ملاحظة داخلية على الملف (مثال: "صورة المكوّنات" لمحتوى وصفة) - لا تُرسل لأي API. */
   caption?: string;
+  /** أبعاد الملف الفعلية (تُقرأ في المتصفح وقت الرفع) - تُستخدم لتحذيرات نسبة الأبعاد فقط. */
+  width?: number;
+  height?: number;
 }
+
+/** وضع تجربة الإنشاء المحفوظ داخل المسودة - لا يغيّر البنية الخلفية، فقط مستوى التفاصيل الظاهر في الواجهة. */
+export type ContentMode = "simple" | "advanced";
 
 export interface PlatformResult {
   status: PlatformResultStatus;
@@ -80,6 +86,8 @@ export interface BaseContent {
 
 export interface PostRecord {
   id: string;
+  /** الوضع المستخدم لتحرير هذا المنشور - يُحفظ داخل المسودة ويُستعاد عند إعادة الفتح. */
+  contentMode: ContentMode;
   base: BaseContent;
   platforms: Platform[];
   overrides: Partial<Record<Platform, PlatformOverride>>;

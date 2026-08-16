@@ -14,7 +14,9 @@ export function validatePost(post: PostRecord): PostValidation {
       mimeType: asset.mimeType,
       kind: asset.kind,
       size: asset.size,
-      altText: asset.altText
+      altText: asset.altText,
+      width: asset.width,
+      height: asset.height
     }));
     result[platform] = validatePlatformContent(platform, { title, caption, hashtags, media });
   }

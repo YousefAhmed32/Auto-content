@@ -9,6 +9,7 @@ function makeAsset(id: string, order: number): MediaAsset {
 function makePost(overrides: Partial<PostRecord> = {}): PostRecord {
   return {
     id: "post-1",
+    contentMode: "advanced",
     base: { title: "عنوان", caption: "نص أساسي", hashtags: ["a", "b"] },
     platforms: ["facebook", "instagram"],
     overrides: {},

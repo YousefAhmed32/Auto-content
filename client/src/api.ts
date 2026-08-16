@@ -1,5 +1,6 @@
 import type {
   Connection,
+  ContentMode,
   DashboardData,
   Platform,
   PlatformCapabilities,
@@ -35,7 +36,7 @@ export const api = {
   tiktokCreatorInfo: () => request<TikTokCreatorInfo>("/api/tiktok/creator-info"),
   connections: () => request<{ connections: Connection[] }>("/api/connections"),
 
-  createDraft: (body: { title?: string; caption?: string; hashtags?: string[]; platforms?: Platform[] }) =>
+  createDraft: (body: { title?: string; caption?: string; hashtags?: string[]; platforms?: Platform[]; contentMode?: ContentMode }) =>
     request<{ post: PostRecord }>("/api/posts", json(body)),
 
   updatePost: (id: string, body: Record<string, unknown>) =>
@@ -43,7 +44,12 @@ export const api = {
 
   deletePost: (id: string) => request<void>(`/api/posts/${id}`, { method: "DELETE" }),
 
-  uploadMedia: (id: string, files: File[], meta: Array<{ altText?: string; caption?: string }>, onProgress?: (percent: number) => void) =>
+  uploadMedia: (
+    id: string,
+    files: File[],
+    meta: Array<{ altText?: string; caption?: string; width?: number; height?: number }>,
+    onProgress?: (percent: number) => void
+  ) =>
     new Promise<{ post: PostRecord }>((resolve, reject) => {
       const body = new FormData();
       files.forEach((file) => body.append("media", file));

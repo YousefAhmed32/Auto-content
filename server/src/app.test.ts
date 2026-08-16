@@ -160,4 +160,79 @@ describe("YANSY Publish API", () => {
     const missing = await request(app).get(`/api/posts/${id}`);
     expect(missing.status).toBe(404);
   });
+
+  it("defaults contentMode to advanced when not specified, but honors an explicit simple mode", async () => {
+    const defaulted = await request(app).post("/api/posts").send({ platforms: ["facebook"] });
+    expect(defaulted.body.post.contentMode).toBe("advanced");
+
+    const simple = await request(app).post("/api/posts").send({ platforms: ["facebook"], contentMode: "simple" });
+    expect(simple.body.post.contentMode).toBe("simple");
+  });
+
+  it("switches contentMode via PATCH without touching platforms, media, or overrides", async () => {
+    const draft = await request(app).post("/api/posts").send({ platforms: ["tiktok"], contentMode: "simple" });
+    const id = draft.body.post.id;
+    await request(app).post(`/api/posts/${id}/media`).attach("media", png1x1, "cover.png");
+    await request(app).patch(`/api/posts/${id}`).send({
+      overrides: { tiktok: { useCustomContent: true, caption: "نص متقدم" } }
+    });
+
+    const switched = await request(app).patch(`/api/posts/${id}`).send({ contentMode: "advanced" });
+    expect(switched.status).toBe(200);
+    expect(switched.body.post.contentMode).toBe("advanced");
+    expect(switched.body.post.platforms).toEqual(["tiktok"]);
+    expect(switched.body.post.media).toHaveLength(1);
+    expect(switched.body.post.overrides.tiktok.caption).toBe("نص متقدم");
+
+    const backToSimple = await request(app).patch(`/api/posts/${id}`).send({ contentMode: "simple" });
+    expect(backToSimple.body.post.contentMode).toBe("simple");
+    // التخصيصات المتقدمة تبقى محفوظة حتى وهي غير ظاهرة في واجهة الوضع البسيط.
+    expect(backToSimple.body.post.overrides.tiktok.caption).toBe("نص متقدم");
+  });
+
+  it("ignores an invalid contentMode value instead of corrupting the post", async () => {
+    const draft = await request(app).post("/api/posts").send({ platforms: ["facebook"], contentMode: "bogus" });
+    expect(draft.body.post.contentMode).toBe("advanced");
+  });
+
+  it("migrates a legacy post with no contentMode field to advanced without losing data", async () => {
+    const draft = await request(app).post("/api/posts").send({ platforms: ["facebook"], title: "قديم" });
+    const id = draft.body.post.id;
+    await updateStore((store) => {
+      const index = store.posts.findIndex((item) => item.id === id);
+      if (index >= 0) {
+        const legacy = store.posts[index] as unknown as Record<string, unknown>;
+        delete legacy.contentMode;
+      }
+    });
+
+    const migrated = await request(app).get(`/api/posts/${id}`);
+    expect(migrated.status).toBe(200);
+    expect(migrated.body.post.contentMode).toBe("advanced");
+    expect(migrated.body.post.base.title).toBe("قديم");
+  });
+
+  it("warns (but does not block) when an uploaded image's aspect ratio is outside Instagram's recommendation", async () => {
+    const draft = await request(app).post("/api/posts").send({ platforms: ["instagram"] });
+    const id = draft.body.post.id;
+    // 1x1 PNG => ratio 1.0, well inside Instagram's 0.8-1.91 recommended band: no warning expected.
+    const square = await request(app)
+      .post(`/api/posts/${id}/media`)
+      .attach("media", png1x1, "square.png")
+      .field("mediaMeta", JSON.stringify([{ width: 1000, height: 1000 }]));
+    expect(square.status).toBe(201);
+    const squareValidation = await request(app).get(`/api/posts/${id}/validate`);
+    expect(squareValidation.body.validation.instagram.some((issue: { code: string }) => issue.code === "aspect-ratio-recommended")).toBe(false);
+
+    await request(app).delete(`/api/posts/${id}/media/${square.body.post.media[0].id}`);
+    const wide = await request(app)
+      .post(`/api/posts/${id}/media`)
+      .attach("media", png1x1, "wide.png")
+      .field("mediaMeta", JSON.stringify([{ width: 4000, height: 1000 }]));
+    const wideValidation = await request(app).get(`/api/posts/${id}/validate`);
+    const warning = wideValidation.body.validation.instagram.find((issue: { code: string }) => issue.code === "aspect-ratio-recommended");
+    expect(warning).toBeDefined();
+    expect(warning.severity).toBe("warning");
+    expect(wide.body.post.media[0].width).toBe(4000);
+  });
 });

@@ -11,12 +11,20 @@
  */
 import type { MediaKind, Platform } from "./types.js";
 
+export interface AspectRatioGuidance {
+  /** أقل نسبة عرض/ارتفاع مقبولة (width/height) قبل تحذير المستخدم - إرشادي وليس رفضًا فعليًا من الـ API. */
+  min: number;
+  max: number;
+  note: string;
+}
+
 export interface MediaCapability {
   formats: string[];
   maxCount: number;
   minCount: number;
   maxFileSizeMb?: number;
   altText: { supported: boolean; maxLength?: number; note: string };
+  aspectRatio?: AspectRatioGuidance;
 }
 
 export interface VideoCapability {
@@ -24,6 +32,7 @@ export interface VideoCapability {
   maxCount: number;
   maxDurationSeconds?: number;
   cover: { supported: boolean; kind?: "timestampMs" | "index"; note: string };
+  aspectRatio?: AspectRatioGuidance;
 }
 
 export interface CarouselCapability {
@@ -111,13 +120,15 @@ export const capabilityMatrix: Record<Platform, PlatformCapabilities> = {
       maxCount: 10,
       minCount: 1,
       maxFileSizeMb: 8,
-      altText: { supported: true, maxLength: 1000, note: "alt_text مدعوم للصور فقط (وليس Reels أو Stories) - أُضيف رسميًا في مارس 2025." }
+      altText: { supported: true, maxLength: 1000, note: "alt_text مدعوم للصور فقط (وليس Reels أو Stories) - أُضيف رسميًا في مارس 2025." },
+      aspectRatio: { min: 0.8, max: 1.91, note: "توصية Meta لمنشورات الصور: نسبة عرض إلى ارتفاع بين 4:5 (0.8) و1.91:1 - خارج هذا النطاق يُقصّ العرض تلقائيًا، ولا يُرفض النشر." }
     },
     video: {
       formats: ["video/mp4", "video/quicktime"],
       maxCount: 1,
       maxDurationSeconds: 900,
-      cover: { supported: true, kind: "timestampMs", note: "thumb_offset بالميلي ثانية لاختيار إطار الغلاف." }
+      cover: { supported: true, kind: "timestampMs", note: "thumb_offset بالميلي ثانية لاختيار إطار الغلاف." },
+      aspectRatio: { min: 0.5, max: 0.8, note: "Reels تُعرض بشكل أفضل بنسبة رأسية قريبة من 9:16 (≈0.5625) - فيديو أفقي سيُعرض مُقصوصًا أو بحواف سوداء." }
     },
     carousel: {
       supported: true,
@@ -155,7 +166,8 @@ export const capabilityMatrix: Record<Platform, PlatformCapabilities> = {
     video: {
       formats: ["video/mp4", "video/quicktime", "video/webm"],
       maxCount: 1,
-      cover: { supported: true, kind: "timestampMs", note: "video_cover_timestamp_ms لاختيار إطار الغلاف؛ الافتراضي أول إطار." }
+      cover: { supported: true, kind: "timestampMs", note: "video_cover_timestamp_ms لاختيار إطار الغلاف؛ الافتراضي أول إطار." },
+      aspectRatio: { min: 0.5, max: 0.8, note: "TikTok مبني على عرض رأسي (يُوصى بحوالي 9:16 ≈0.5625) - فيديو أفقي يظهر بحواف كبيرة." }
     },
     carousel: {
       supported: true,
@@ -237,7 +249,26 @@ export interface PlatformValidationInput {
   title: string;
   caption: string;
   hashtags: string[];
-  media: Array<{ id: string; mimeType: string; kind: MediaKind; size: number; altText?: string }>;
+  media: Array<{ id: string; mimeType: string; kind: MediaKind; size: number; altText?: string; width?: number; height?: number }>;
+}
+
+/**
+ * تحذير إرشادي (لا يمنع النشر) عندما تخرج نسبة أبعاد ملف عن التوصية المسجّلة للمنصة.
+ * لا يُطبَّق إلا إذا كانت الأبعاد معروفة فعليًا (تُقرأ في المتصفح وقت الرفع) وكانت المنصة تنشر توصية.
+ */
+function checkAspectRatio(
+  media: { id: string; width?: number; height?: number },
+  guidance: AspectRatioGuidance | undefined,
+  platformLabel: string
+): ValidationIssue | undefined {
+  if (!guidance || !media.width || !media.height) return undefined;
+  const ratio = media.width / media.height;
+  if (ratio >= guidance.min && ratio <= guidance.max) return undefined;
+  return {
+    code: "aspect-ratio-recommended",
+    severity: "warning",
+    message: `نسبة أبعاد أحد الملفات (${media.width}×${media.height}) خارج التوصية المناسبة لـ${platformLabel}. ${guidance.note}`
+  };
 }
 
 /** يتحقق من محتوى منصة واحدة مقابل الـ Capability Matrix. مصدر الثقة النهائي (server-side) قبل أي إرسال حقيقي. */
@@ -270,6 +301,8 @@ export function validatePlatformContent(platform: Platform, input: PlatformValid
       if (capability.video && !capability.video.formats.includes(video.mimeType)) {
         issues.push({ code: "video-format", severity: "error", message: `صيغة الفيديو (${video.mimeType}) غير مدعومة على ${capability.label}.` });
       }
+      const ratioIssue = capability.video && checkAspectRatio(video, capability.video.aspectRatio, capability.label);
+      if (ratioIssue) issues.push(ratioIssue);
     }
   }
 
@@ -309,6 +342,8 @@ export function validatePlatformContent(platform: Platform, input: PlatformValid
             message: `النص البديل لإحدى الصور أطول من الحد المسموح (${capability.image.altText.maxLength} حرف) على ${capability.label}.`
           });
         }
+        const ratioIssue = checkAspectRatio(image, capability.image.aspectRatio, capability.label);
+        if (ratioIssue) issues.push(ratioIssue);
       }
     }
   }

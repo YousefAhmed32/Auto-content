@@ -1,21 +1,32 @@
 import { useRef, useState, type DragEvent } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, Film, GripVertical, ImagePlus, RefreshCw, Trash2, UploadCloud } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Film, GripVertical, ImagePlus, LoaderCircle, RefreshCw, Trash2, UploadCloud, X } from "lucide-react";
 import { api } from "../api";
 import type { MediaAsset, PostRecord } from "../types";
+import { readMediaDimensions } from "./mediaDimensions";
 
 const ACCEPTED = "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm";
+
+interface QueueItem {
+  id: string;
+  name: string;
+  status: "uploading" | "done" | "error";
+  message?: string;
+  progress: number;
+}
 
 function formatSize(bytes: number) {
   return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)}MB` : `${Math.max(1, Math.round(bytes / 1024))}KB`;
 }
 
-export function MediaLibrary({ post, onPostUpdate, notify }: {
+export function MediaLibrary({ post, onPostUpdate, notify, compact = false }: {
   post: PostRecord;
   onPostUpdate: (post: PostRecord) => void;
   notify: (message: string, type?: "success" | "error") => void;
+  /** الوضع البسيط: يخفي حقول alt text والملاحظة الداخلية ويبقي أدوات الرفع/الترتيب/الاستبدال/الحذف الأساسية فقط. */
+  compact?: boolean;
 }) {
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -24,20 +35,43 @@ export function MediaLibrary({ post, onPostUpdate, notify }: {
   const replaceTargetId = useRef<string | null>(null);
   const media = [...post.media].sort((a, b) => a.order - b.order);
 
+  /** يرفع كل ملف على حدة (لا دفعة واحدة) حتى لا يمنع فشل ملف واحد رفع باقي الملفات، ولإظهار حالة/خطأ كل ملف منفردًا. */
   async function uploadFiles(files: File[]) {
     if (!files.length) return;
     setUploading(true);
-    setProgress(0);
-    try {
-      const meta = files.map(() => ({}));
-      const { post: updated } = await api.uploadMedia(post.id, files, meta, setProgress);
-      onPostUpdate(updated);
-      notify(files.length > 1 ? `تم رفع ${files.length} ملفات` : "تم رفع الملف");
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "تعذر رفع الملفات", "error");
-    } finally {
-      setUploading(false);
-      setProgress(0);
+    const items: QueueItem[] = files.map((file, index) => ({
+      id: `${Date.now()}-${index}-${file.name}`,
+      name: file.name,
+      status: "uploading",
+      progress: 0
+    }));
+    setQueue(items);
+
+    let successCount = 0;
+    let failureCount = 0;
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index]!;
+      const queueId = items[index]!.id;
+      try {
+        const dimensions = await readMediaDimensions(file);
+        const { post: updated } = await api.uploadMedia(post.id, [file], [dimensions], (percent) => {
+          setQueue((current) => current.map((item) => (item.id === queueId ? { ...item, progress: percent } : item)));
+        });
+        onPostUpdate(updated);
+        successCount += 1;
+        setQueue((current) => current.map((item) => (item.id === queueId ? { ...item, status: "done", progress: 100 } : item)));
+      } catch (error) {
+        failureCount += 1;
+        const message = error instanceof Error ? error.message : "تعذر رفع الملف";
+        setQueue((current) => current.map((item) => (item.id === queueId ? { ...item, status: "error", message } : item)));
+      }
+    }
+
+    setUploading(false);
+    if (successCount) notify(successCount > 1 ? `تم رفع ${successCount} ملفات` : "تم رفع الملف");
+    if (failureCount) notify(`تعذر رفع ${failureCount} ${failureCount === 1 ? "ملف" : "ملفات"} - راجع السبب أسفل منطقة الرفع`, "error");
+    if (!failureCount) {
+      window.setTimeout(() => setQueue((current) => (current.every((item) => item.status === "done") ? [] : current)), 2000);
     }
   }
 
@@ -45,7 +79,8 @@ export function MediaLibrary({ post, onPostUpdate, notify }: {
     setBusyId(mediaId);
     try {
       const original = post.media.find((item) => item.id === mediaId);
-      const { post: afterUpload } = await api.uploadMedia(post.id, [file], [{}]);
+      const dimensions = await readMediaDimensions(file);
+      const { post: afterUpload } = await api.uploadMedia(post.id, [file], [dimensions]);
       const added = afterUpload.media.find((item) => !post.media.some((existing) => existing.id === item.id));
       if (added && original) {
         const order = [...afterUpload.media].sort((a, b) => a.order - b.order).map((item) => item.id);
@@ -122,7 +157,7 @@ export function MediaLibrary({ post, onPostUpdate, notify }: {
   }
 
   return (
-    <div className="media-library">
+    <div className={`media-library ${compact ? "compact" : ""}`}>
       <div
         className={`upload-zone ${dragOver ? "drag-over" : ""}`}
         role="button"
@@ -144,8 +179,7 @@ export function MediaLibrary({ post, onPostUpdate, notify }: {
         {uploading ? (
           <>
             <span className="upload-icon"><UploadCloud size={26} /></span>
-            <strong>جاري الرفع… {progress}%</strong>
-            <div className="upload-progress-track"><span style={{ width: `${progress}%` }} /></div>
+            <strong>جاري رفع الملفات…</strong>
           </>
         ) : (
           <>
@@ -156,6 +190,28 @@ export function MediaLibrary({ post, onPostUpdate, notify }: {
           </>
         )}
       </div>
+
+      {queue.length > 0 && (
+        <ul className="upload-queue" aria-label="حالة رفع الملفات">
+          {queue.map((item) => (
+            <li key={item.id} className={`upload-queue-item ${item.status}`}>
+              <span className="upload-queue-icon">
+                {item.status === "uploading" && <LoaderCircle className="spin" size={14} />}
+                {item.status === "done" && <CheckCircle2 size={14} />}
+                {item.status === "error" && <AlertTriangle size={14} />}
+              </span>
+              <span className="upload-queue-name" title={item.name}>{item.name}</span>
+              {item.status === "uploading" && <span className="upload-queue-progress">{item.progress}%</span>}
+              {item.status === "error" && <span className="upload-queue-message">{item.message}</span>}
+              {item.status !== "uploading" && (
+                <button type="button" className="upload-queue-dismiss" aria-label="إخفاء" onClick={() => setQueue((current) => current.filter((entry) => entry.id !== item.id))}>
+                  <X size={12} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {media.length > 0 && (
         <div className="media-grid" role="list" aria-label="ملفات الوسائط">
@@ -192,25 +248,32 @@ export function MediaLibrary({ post, onPostUpdate, notify }: {
               </div>
               <div className="media-card-body">
                 <small className="media-card-name" title={asset.originalName}>{asset.originalName}</small>
-                <small className="media-card-size">{formatSize(asset.size)}</small>
-                <label className="field mini-field">
-                  <span>نص بديل (Alt text - Instagram فقط)</span>
-                  <input
-                    defaultValue={asset.altText ?? ""}
-                    maxLength={1000}
-                    placeholder="وصف قصير للصورة لإتاحة الوصول"
-                    onBlur={(event) => { if (event.target.value !== (asset.altText ?? "")) void updateAssetMeta(asset.id, { altText: event.target.value }); }}
-                  />
-                </label>
-                <label className="field mini-field">
-                  <span>ملاحظة داخلية (اختياري)</span>
-                  <input
-                    defaultValue={asset.caption ?? ""}
-                    maxLength={300}
-                    placeholder="مثال: صورة المكوّنات"
-                    onBlur={(event) => { if (event.target.value !== (asset.caption ?? "")) void updateAssetMeta(asset.id, { caption: event.target.value }); }}
-                  />
-                </label>
+                <small className="media-card-size">
+                  {formatSize(asset.size)}
+                  {asset.width && asset.height ? ` · ${asset.width}×${asset.height}` : ""}
+                </small>
+                {!compact && (
+                  <>
+                    <label className="field mini-field">
+                      <span>نص بديل (Alt text - Instagram فقط)</span>
+                      <input
+                        defaultValue={asset.altText ?? ""}
+                        maxLength={1000}
+                        placeholder="وصف قصير للصورة لإتاحة الوصول"
+                        onBlur={(event) => { if (event.target.value !== (asset.altText ?? "")) void updateAssetMeta(asset.id, { altText: event.target.value }); }}
+                      />
+                    </label>
+                    <label className="field mini-field">
+                      <span>ملاحظة داخلية (اختياري)</span>
+                      <input
+                        defaultValue={asset.caption ?? ""}
+                        maxLength={300}
+                        placeholder="مثال: صورة المكوّنات"
+                        onBlur={(event) => { if (event.target.value !== (asset.caption ?? "")) void updateAssetMeta(asset.id, { caption: event.target.value }); }}
+                      />
+                    </label>
+                  </>
+                )}
               </div>
               <footer className="media-card-actions">
                 <button
@@ -259,7 +322,7 @@ export function MediaLibrary({ post, onPostUpdate, notify }: {
         <p className="media-empty-hint"><AlertTriangle size={14} /> لم تُضف أي وسائط بعد - يلزم ملف واحد على الأقل للمتابعة.</p>
       )}
       {media.length > 1 && (
-        <p className="media-order-hint"><ImagePlus size={14} /> اسحب البطاقات لإعادة الترتيب - الترتيب يمثل تسلسل الظهور (مثال: غلاف ← مكوّنات ← خطوات ← النتيجة).</p>
+        <p className="media-order-hint"><ImagePlus size={14} /> اسحب البطاقات أو استخدم أزرار النقل لإعادة الترتيب - الترتيب يمثل تسلسل الظهور (مثال: غلاف ← مكوّنات ← خطوات ← النتيجة).</p>
       )}
     </div>
   );

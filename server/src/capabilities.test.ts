@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { getCapabilities, mediaKindOf, validatePlatformContent } from "./capabilities.js";
 
-function image(overrides: Partial<{ id: string; mimeType: string; size: number; altText: string }> = {}) {
-  return { id: overrides.id ?? "img", mimeType: overrides.mimeType ?? "image/jpeg", kind: "image" as const, size: overrides.size ?? 1024, altText: overrides.altText };
+function image(overrides: Partial<{ id: string; mimeType: string; size: number; altText: string; width: number; height: number }> = {}) {
+  return {
+    id: overrides.id ?? "img",
+    mimeType: overrides.mimeType ?? "image/jpeg",
+    kind: "image" as const,
+    size: overrides.size ?? 1024,
+    altText: overrides.altText,
+    width: overrides.width,
+    height: overrides.height
+  };
 }
 function video(overrides: Partial<{ id: string; mimeType: string; size: number }> = {}) {
   return { id: overrides.id ?? "vid", mimeType: overrides.mimeType ?? "video/mp4", kind: "video" as const, size: overrides.size ?? 1024 };
@@ -86,5 +94,27 @@ describe("validatePlatformContent", () => {
   it("accepts a single valid image with no issues on Facebook", () => {
     const issues = validatePlatformContent("facebook", { title: "", caption: "منشور تجريبي", hashtags: ["تجربة"], media: [image()] });
     expect(issues).toHaveLength(0);
+  });
+
+  it("warns when an image's aspect ratio falls outside Instagram's recommendation", () => {
+    const issues = validatePlatformContent("instagram", { title: "", caption: "", hashtags: [], media: [image({ width: 4000, height: 1000 })] });
+    const warning = issues.find((issue) => issue.code === "aspect-ratio-recommended");
+    expect(warning).toBeDefined();
+    expect(warning!.severity).toBe("warning");
+  });
+
+  it("does not warn about aspect ratio when dimensions are unknown", () => {
+    const issues = validatePlatformContent("instagram", { title: "", caption: "", hashtags: [], media: [image()] });
+    expect(issues.some((issue) => issue.code === "aspect-ratio-recommended")).toBe(false);
+  });
+
+  it("does not warn about aspect ratio when the image is within Instagram's recommended band", () => {
+    const issues = validatePlatformContent("instagram", { title: "", caption: "", hashtags: [], media: [image({ width: 1080, height: 1080 })] });
+    expect(issues.some((issue) => issue.code === "aspect-ratio-recommended")).toBe(false);
+  });
+
+  it("does not apply aspect-ratio guidance to a platform that has none declared (Facebook)", () => {
+    const issues = validatePlatformContent("facebook", { title: "", caption: "", hashtags: [], media: [image({ width: 4000, height: 1000 })] });
+    expect(issues.some((issue) => issue.code === "aspect-ratio-recommended")).toBe(false);
   });
 });

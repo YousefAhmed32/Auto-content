@@ -22,6 +22,7 @@ const { publishPost, publishSinglePlatform } = await import("./publishing.js");
 function makePost(): PostRecord {
   return {
     id: "p1",
+    contentMode: "advanced",
     base: { title: "عنوان", caption: "نص", hashtags: [] },
     platforms: ["facebook", "tiktok"],
     overrides: {},
